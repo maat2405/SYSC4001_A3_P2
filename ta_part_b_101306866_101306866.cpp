@@ -11,28 +11,33 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <semaphore.h>
 
 using namespace std;
 
-constexpr int MAX_EXAMS = 30;
-constexpr int Q = 5;
+constexpr int MAX_EXAMS = 100; // must run at least 20 exams
+constexpr int Q = 5;           // 5 questions per rubric
 
 struct Shared {
-    int totalExams;                 // number of exam files found
-    int currentIndex;               // index of currently loaded exam
-    vector<string> examPaths;       // list of exam file paths
-    string loadedExam;              // path of currently loaded exam
-    string loadedStudent;           // student id
-    int questionStatus[Q];          // 0 = unmarked, 1 = being_marked, 2 = marked
-    char rubric[Q];                 // one char per question
-    int finished;                   // 0 running, 1 finish
+    int totalExams;
+    int currentIndex;
+    vector<string> examPaths;
+    string loadedExam;
+    string loadedStudent;
+    int questionStatus[Q]; // 0 = unmarked, 1 = being_marked, 2 = marked
+    char rubric[Q];
+    int finished;
+
+    sem_t sem_rubric; // protects rubric
+    sem_t sem_exam;   // protects currentIndex & loadedExam
 };
 
+// Random double between lo and hi
 static double rand_between(double lo, double hi) {
     return lo + (hi - lo) * (rand() / double(RAND_MAX));
 }
 
-// Read rubric.txt into shared memory
+// Load rubric file into shared memory
 void loadRubricFile(const string &rubricPath, Shared *S) {
     ifstream in(rubricPath);
     if (!in.is_open()) {
@@ -54,7 +59,7 @@ void loadRubricFile(const string &rubricPath, Shared *S) {
     for (; i < Q; ++i) S->rubric[i] = 'A' + i;
 }
 
-// Write shared memory rubric back to file
+// Save shared memory rubric to file
 void saveRubricFile(const string &rubricPath, Shared *S) {
     ofstream out(rubricPath, ios::trunc);
     if (!out.is_open()) {
@@ -91,7 +96,7 @@ void loadCurrentExam(Shared *S) {
     for (int i=0;i<Q;++i) S->questionStatus[i] = 0;
 }
 
-// TA process work
+// TA process
 void ta_main(int ta_id, Shared *S, const string &rubricPath) {
     srand((unsigned)time(nullptr) ^ (getpid()<<8) ^ ta_id);
 
@@ -109,11 +114,13 @@ void ta_main(int ta_id, Shared *S, const string &rubricPath) {
             usleep(static_cast<useconds_t>(waitt * 1e6));
 
             if (rand() % 2 == 0) {
+                sem_wait(&S->sem_rubric);
                 char old = S->rubric[r];
                 S->rubric[r] = static_cast<char>(S->rubric[r] + 1);
                 cout << "[TA " << ta_id << " pid " << getpid() << "] Changed rubric Q" << (r+1)
                      << ": " << old << " -> " << S->rubric[r] << " (saving)\n";
                 saveRubricFile(rubricPath, S);
+                sem_post(&S->sem_rubric);
             } else {
                 cout << "[TA " << ta_id << " pid " << getpid() << "] No change Q" << (r+1)
                      << " (currently " << S->rubric[r] << ")\n";
@@ -153,9 +160,11 @@ void ta_main(int ta_id, Shared *S, const string &rubricPath) {
             cout << "[TA " << ta_id << " pid " << getpid() << "] Detected exam " << S->loadedExam
                  << " (student " << S->loadedStudent << ") complete.\n";
 
+            sem_wait(&S->sem_exam);
             if (S->currentIndex + 1 >= S->totalExams) {
                 cout << "[TA " << ta_id << " pid " << getpid() << "] No more exams. Setting finished flag.\n";
                 S->finished = 1;
+                sem_post(&S->sem_exam);
                 break;
             } else {
                 S->currentIndex++;
@@ -167,8 +176,8 @@ void ta_main(int ta_id, Shared *S, const string &rubricPath) {
                 if (S->loadedStudent == "9999") {
                     cout << "[TA " << ta_id << " pid " << getpid() << "] Found student 9999. Setting finished.\n";
                     S->finished = 1;
-                    break;
                 }
+                sem_post(&S->sem_exam);
             }
         }
         usleep(100000);
@@ -182,6 +191,7 @@ int main(int argc, char **argv) {
         cerr << "Usage: " << argv[0] << " <num_TAs> <exams_dir> <rubric.txt>\n";
         return 1;
     }
+
     int n = atoi(argv[1]);
     if (n < 2) { cerr << "Please provide n >= 2\n"; return 1; }
     string examsDir = argv[2];
@@ -190,11 +200,11 @@ int main(int argc, char **argv) {
     Shared *S = (Shared*) mmap(nullptr, sizeof(Shared),
                                PROT_READ | PROT_WRITE,
                                MAP_SHARED | MAP_ANON, -1, 0);
-    if (S == MAP_FAILED) {
-        perror("mmap");
-        return 1;
-    }
+    if (S == MAP_FAILED) { perror("mmap"); return 1; }
     memset(S, 0, sizeof(Shared));
+
+    sem_init(&S->sem_rubric, 1, 1);
+    sem_init(&S->sem_exam, 1, 1);
 
     // gather exam filenames
     DIR *d = opendir(examsDir.c_str());
@@ -229,14 +239,12 @@ int main(int argc, char **argv) {
         else { children.push_back(pid); }
     }
 
-    int status;
-    while (!children.empty()) {
-        pid_t p = wait(&status);
-        if (p <= 0) break;
-        children.erase(remove(children.begin(), children.end(), p), children.end());
-    }
+    for (auto &pid : children) waitpid(pid, nullptr, 0);
 
+    sem_destroy(&S->sem_rubric);
+    sem_destroy(&S->sem_exam);
     munmap(S, sizeof(Shared));
+
     cout << "Parent: all TAs finished.\n";
     return 0;
 }

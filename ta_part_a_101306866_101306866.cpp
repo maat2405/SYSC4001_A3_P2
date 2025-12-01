@@ -14,8 +14,8 @@
 
 using namespace std;
 
-constexpr int MAX_EXAMS = 30;
-constexpr int Q = 5;
+constexpr int MAX_EXAMS = 100; //must run at least 20 exams
+constexpr int Q = 5; //5 questions in each rubric
 
 struct Shared {
     int totalExams;                 // number of exam files found
@@ -32,7 +32,7 @@ static double rand_between(double lo, double hi) {
     return lo + (hi - lo) * (rand() / double(RAND_MAX));
 }
 
-// Read rubric.txt into shared memory
+// Reads rubric into shared memory
 void loadRubricFile(const string &rubricPath, Shared *S) {
     ifstream in(rubricPath);
     if (!in.is_open()) {
