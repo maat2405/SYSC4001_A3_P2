@@ -8,13 +8,13 @@ This project simulates multiple Teaching Assistants marking student exams at the
 4. Open a Linux or macOS terminal. Navigate to the project directory:
    cd /path/to/SYSC4001_A3_P2
 5. Compile part A:
-   g++ -std=c++17 -pthread ta_part_a.cpp -o ta_part_a
+   g++ -std=c++17 -pthread ta_part_a_101306866_101302780.cpp -o ta_part_a_101306866_101302780
 6. Compile part B:
-   g++ -std=c++17 -pthread ta_part_b.cpp -o ta_part_b
+   g++ -std=c++17 -pthread ta_part_b_101306866_101302780.cpp -o ta_part_b_101306866_101302780
 7. Run part A, make sure # is replaced with number of TA processes (greater than 2)
-   ./ta_part_a # ./exams rubric.txt
+   ./ta_part_a_101306866_101302780 # ./exams rubric.txt
 8. Run part B, same as above replace # with number of TAs
-   ./ta_part_b # ./exams rubric.txt
+   ./ta_part_b_101306866_101302780 # ./exams rubric.txt
 9. Program runs and prints TA actions to the terminal
 
 # Authors
